@@ -1,0 +1,5 @@
+venv/
+__pycache__
+config.py
+.vscode/launch.json
+Логика приложения.dia.autosave
