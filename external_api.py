@@ -1,11 +1,10 @@
 import requests
 import pycountry # docs https://pypi.org/project/pycountry/
-import datetime
-import json
+from datetime import datetime, timezone, timedelta
 from  pprint import pprint
-#from yattag import Doc
 from weather_pics import code_to_unipic
 import config
+import pymorphy2
 
 # OWM_TOKEN= os.getenv('OWM_TOKEN')
 # MTT_TOKEN= os.getenv('MTT_TOKEN')
@@ -61,7 +60,7 @@ def owm_api_geo(city: str) -> dict:
             try:             
                 dict_one[counter]['state'] = mtt_api(city['state'])[0]['translations'][0]['text'] # перевод региона
             except:
-                pass  
+                dict_one[counter]['state'] = city['state']
 
             #координаты для коллбэков в инлайн кнопки и отправки уточненной геопозиции       
             dict_one[counter]['geo']['lat'] = city['lat']
@@ -70,7 +69,7 @@ def owm_api_geo(city: str) -> dict:
             #получаем объект страны из api iso3166 (коды стран мира)
             country_iso3166 = pycountry.countries.get(alpha_2=city['country']) 
             country = mtt_api(country_iso3166.name)[0]['translations'][0]['text']  #перевод названия страны
-            if country == 'Российская Федерация': country = 'Россия'
+            if country == 'Российская Федерация': country = 'РФ'
             dict_one[counter]['country'] = country
 
             dict_full.update(dict_one) # добавляем отдельный словарь в общий
@@ -91,7 +90,8 @@ def get_weather(geo: dict) -> str:
 
     try:
         r = requests.get('https://api.openweathermap.org/data/2.5/weather',
-                          params={"lat" : geo['lat'], "lon" : geo['lon'], "appid" : config.OWM_TOKEN, "units" : "metric", "lang" : "ru"}
+                          params={"lat" : geo['lat'], "lon" : geo['lon'], \
+                                  "appid" : config.OWM_TOKEN, "units" : "metric", "lang" : "ru"}
         )
         
         if r.status_code != 200:
@@ -100,126 +100,123 @@ def get_weather(geo: dict) -> str:
         data = r.json()
         pprint(data)
 
-
-        city = mtt_api(data["name"])[0]['translations'][0]['text'] #Название населенного пункта на русском языке
-        cur_weather = round(data["main"]["temp"], 0) #Температура воздуха
+        #city = mtt_api(data["name"])[0]['translations'][0]['text'] #Название населенного пункта на русском языке
+        city = data["name"] #Название населенного пункта на русском языке       
+        cur_weather = int(round(data["main"]["temp"])) #Температура воздуха
 
         # weather = data["weather"][0]["main"] #короткое описание погоды
         weather_id = data["weather"][0]["id"] #код погоды для выбора картинки
         weather_description = data["weather"][0]["description"] #подробное описание погоды на русском языке        
         
         # определение направления ветра
-        winddirections = ("Сев.", "С-В", "Вост.", "Ю-В", "Юж.", \
-                          "Ю-З", "Зап.", "С-З")
+        winddirections = ("С.", "С-В", "В.", "Ю-В", "Ю.", \
+                          "Ю-З", "З.", "С-З")
         direction = int((data["wind"]["deg"] + 22.5) // 45 % 8)
         wind_deg = winddirections[direction]
+        wind_speed = int(round(data["wind"]["speed"])) #скорость ветра
 
         humidity = data["main"]["humidity"] #влажность
-        pressure = round((data["main"]["pressure"] * 3 / 4), 0) #давление
-        wind_speed = round(data["wind"]["speed"], 0) #скорость ветра
+        pressure = int(round((data["main"]["pressure"] * 3 / 4))) #давление
+        
 
         #создание объекта часового пояса для сдвига относитьно UTC
-        tz = datetime.timezone(datetime.timedelta(seconds=data["timezone"]))
+        tz = timezone(timedelta(seconds=data["timezone"]))
         
         #Рассвет и закат по UTC, скорректированные на часовой пояс региона погоды
-        sunrise_timestamp = datetime.datetime.fromtimestamp(data["sys"]["sunrise"], tz=tz).strftime('%H:%M:%S')
-        sunset_timestamp = datetime.datetime.fromtimestamp(data["sys"]["sunset"], tz=tz).strftime('%H:%M:%S')
+        sunrise = datetime.fromtimestamp(data["sys"]["sunrise"], tz=tz).strftime('%H:%M:%S')
+        sunset = datetime.fromtimestamp(data["sys"]["sunset"], tz=tz).strftime('%H:%M:%S')
         
         #Продолжительность светового дня
-        length_of_the_day = datetime.datetime.fromtimestamp(data["sys"]["sunset"], tz=tz) - \
-                            datetime.datetime.fromtimestamp(data["sys"]["sunrise"], tz=tz)
+        len_day = datetime.fromtimestamp(data["sys"]["sunset"], tz=tz) - \
+                            datetime.fromtimestamp(data["sys"]["sunrise"], tz=tz)
 
-        text = (f"*** {datetime.datetime.now(tz=tz).strftime('%d.%m.%Y %H:%M')} ***\n"
-                f"Погода сейчас в <b>{city}</b>\nТемпература: {cur_weather}C° {weather_description} {code_to_unipic[weather_id]}\n"
+        try:
+            morph = pymorphy2.MorphAnalyzer()
+            city = morph.parse(city)[0]
+            city = city.inflect({'loct'}).word
+        except:
+            pass
+
+        text = (f"*** {datetime.now(tz=tz).strftime('%d.%m.%Y %H:%M')} ***\n"
+                f"Погода сейчас в <b>{city.capitalize()}</b>\nТемпература: {cur_weather}C° {weather_description} {code_to_unipic[weather_id]}\n"
                 f"Влажность: {humidity}%\nДавление: {pressure} мм.рт.ст\nВетер: {wind_deg} {wind_speed} м/с\n"
-                f"Восход солнца: {sunrise_timestamp}\nЗакат солнца: {sunset_timestamp}\n"
-                f"Продолжительность дня: {length_of_the_day}\n"
+                f"Восход солнца: {sunrise}\nЗакат солнца: {sunset}\n"
+                f"Продолжительность дня: {len_day}\n"
                 f"<u><b>Хорошего дня!</b></u>"
                 )             
 
         return text
 
+    except requests.ConnectionError:
+        return '<ошибка соединения>'
     except Exception as ex:
         print(ex)
-    except requests.ConnectionError:
-        return '<сетевая ошибка (ошибка соединения)>'
 
-def get_forecast(geo: dict, timestamps: int) -> str:
+def get_forecast(geo: dict) -> str:
     '''OpenWeather 5Day/3Hour Forecast API
     https://openweathermap.org/forecast5'''
-    geo_list = geo.split('_')
-    
+        
     try:
         r = requests.get('https://api.openweathermap.org/data/2.5/forecast',
             params={"lat" : geo['lat'], "lon" : geo['lon'], 'appid': config.OWM_TOKEN, \
-                    'cnt': timestamps, 'units': 'metric', 'lang': 'ru'}
+                    'units': 'metric', 'lang': 'ru'}
         )
 
         if r.status_code != 200:
             return '<ошибка на сервере OpenWeather 5Day/3Hour Forecast API>'
         data = r.json()
+        
+        city = data["city"]["name"]
+        tz = timezone(timedelta(seconds=data["city"]["timezone"]))
+        sunrise = datetime.fromtimestamp(data["city"]["sunrise"], tz=tz).strftime('%H:%M:%S')
+        sunset = datetime.fromtimestamp(data["city"]["sunset"], tz=tz).strftime('%H:%M:%S')
+        len_day = datetime.fromtimestamp(data["city"]["sunset"], tz=tz) - \
+                                datetime.fromtimestamp(data["city"]["sunrise"], tz=tz)
+        
+        today = datetime.now(tz=tz)
+        tomorrow = datetime.now(tz=tz) + timedelta(days=1)
+        time_limit = datetime.now(tz=tz).replace(hour=20, minute=00, second=00, microsecond=0)
+        if today < time_limit:
+            day_forecast = today
+        else:
+            day_forecast = tomorrow
 
-        text = ''
-        city = mtt_api(data["city"]["name"])[0]['translations'][0]['text']
+        try:
+            morph = pymorphy2.MorphAnalyzer()
+            city = morph.parse(city)[0]
+            city = city.inflect({'loct'}).word
+        except:
+            pass
 
-        for i in data['list']:                   
+        text = f"Погода в {city.capitalize()}, {day_forecast.strftime('%d-%m-%Y')}"
 
+        for item in data['list']:                   
+
+            dt = datetime.fromtimestamp(item['dt'], tz=tz)
+            temper = int(round(item["main"]["temp"]))            
+            weather = item["weather"][0]["main"] #короткое описание погоды
+            weather_id = item["weather"][0]["id"] #код погоды для выбора картинки
+            weather_description = item["weather"][0]["description"] #подробное описание погоды на русском языке 
             
-            forecast_temp = round(data["main"]["temp"], 0)
-
-            weather = data["weather"][0]["main"]
-            # if weather in code_to_smile:
-            #     wpic = code_to_smile[weather]
-            # else:
-            #     wpic = code_to_smile['other']
-
-            weather_icon = data["weather"][0]["icon"]
-            
-            winddirections = ("С", "С-В", "В", "Ю-В", "Ю", \
-                              "Ю-З", "З", "С-З")
-            direction = int((data["wind"]["deg"] + 22.5) // 45 % 8)
+            winddirections = ("С.", "С-В", "В.", "Ю-В", "Ю.", \
+                              "Ю-З", "З.", "С-З")
+            direction = int((item["wind"]["deg"] + 22.5) // 45 % 8)
             wind_deg = winddirections[direction]
-
-            humidity = data["main"]["humidity"]
-            pressure = round((data["main"]["pressure"] * 3 / 4), 0)
-            wind_speed = round(data["wind"]["speed"], 0)
-            tz = datetime.timezone(datetime.timedelta(seconds=data["city"]["timezone"]))
-            sunrise_timestamp = datetime.datetime.fromtimestamp(data["city"]["sunrise"], tz=tz).strftime('%H:%M:%S')
-            sunset_timestamp = datetime.datetime.fromtimestamp(data["city"]["sunset"], tz=tz).strftime('%H:%M:%S')
-            length_of_the_day = datetime.datetime.fromtimestamp(data["city"]["sunset"], tz=tz) - \
-                                datetime.datetime.fromtimestamp(data["city"]["sunrise"], tz=tz)
-
-            # text = (f"*** {datetime.datetime.now(tz=tz).strftime('%d.%m.%Y %H:%M')} ***\n"
-            #         f"Погода сейчас в : {city}\nТемпература: {cur_weather}C° {wd}\n"
-            #         f"Влажность: {humidity}%\nДавление: {pressure} мм.рт.ст\nВетер: {wind_deg} {wind_speed} м/с\n"
-            #         f"Восход солнца: {sunrise_timestamp}\nЗакат солнца: {sunset_timestamp}\n"
-            #         f"Продолжительность дня: {length_of_the_day}\n"
-            #         f"Хорошего дня!"
-            #         )
-
-
-            # doc, tag, text = Doc().tagtext()
-        # with tag('h1'):
-        #     text('Заголовок первого уровня')
-        #     with tag('h2'):
-        #         text('Заголовок второго уровня')
-        # text = '''
-        #         <!DOCTYPE html>
-        #         <html>
-        #         <head>
-        #             <title>be1.ru</title>
-        #         </head>
-        #         <body>
-        #         <p>ыва</p>
-        #         </body>
-        #         </html>''' 
-
-            text = f'{text}\n' + (i['dt_txt'] + '{0:+3.0f}'.format(i['main']['temp']) + i['weather'][0]['description'])
+            wind_speed = int(round(item["wind"]["speed"]))
+            humidity = item["main"]["humidity"]
+            pressure = int(round((item["main"]["pressure"] * 3 / 4)))
+            
+            if dt.strftime('%d-%m-%Y') == day_forecast.strftime('%d-%m-%Y'):
+                text = (text + \
+                        f"\n{dt.strftime('%H:%M')} {code_to_unipic[weather_id]} {temper}C°, "
+                        f"{wind_deg} {wind_speed} м/с.")  
 
         return text        
 
+    except requests.ConnectionError:
+        return '<ошибка соединения>'
     except Exception as ex:
         print(ex)
-    except requests.ConnectionError:
-        return '<сетевая ошибка>'
+    
+        
         

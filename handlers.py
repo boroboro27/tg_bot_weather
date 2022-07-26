@@ -102,10 +102,11 @@ async def forecast(callback: types.CallbackQuery, state: FSMContext) -> None:
         weather = external_api.get_forecast(data)
     await callback.message.answer(weather)
     await state.clear()
+    await callback.answer() 
 
 # хэндлер для прочего текста
 @router.message(content_types="text", state='*')
 async def other_cmd(msg: types.Message, state: FSMContext) -> None:  
     await state.set_state(MenuState.start)  
-    await msg.reply(text='Привет! Отправь мне название нужного населённого пункта или своё местоположение.',
+    await msg.reply(text='Привет! Отправь мне название населённого пункта или своё местоположение.',
                      reply_markup= await keyboards.start_menu())
