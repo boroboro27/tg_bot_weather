@@ -6,7 +6,7 @@ import config
 
 import logging
 import sys
-import os    
+#import os    
     
 
 # Запуск бота
