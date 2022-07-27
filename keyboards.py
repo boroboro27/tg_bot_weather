@@ -43,6 +43,7 @@ async def start_menu() -> ReplyKeyboardMarkup:
     # из одной или нескольких кнопок. Например, первый ряд
     # будет состоять из двух кнопок...
     builder.row(
+        KeyboardButton(text='Город'),
         KeyboardButton(text='Отправить моё местоположение', request_location=True)
     )
 

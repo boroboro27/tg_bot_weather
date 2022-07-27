@@ -20,9 +20,12 @@ class MenuState(StatesGroup):
 # то хэндлер сообщения сработает даже на картинку с подписью /start
 @router.message(content_types="text", commands='start')
 async def start_cmd(msg: types.Message, state: FSMContext) -> None:  
-    await state.set_state(MenuState.start)  
-    await msg.answer(text='Привет! Отправь мне название нужного населённого пункта или своё местоположение.',
-                     reply_markup= await keyboards.start_menu())    
+    await state.set_state(MenuState.start) 
+    text = (f'{msg.from_user.first_name}, привет! У природы нет плохой погоды!\U0001F308'
+            '\nА прогноз дорог к обеду:)\n'
+            'В общем, отправь мне название нужного населённого пункта или своё местоположение.'
+    ) 
+    await msg.answer(text=text, reply_markup= await keyboards.start_menu())    
 
 # даём возможность отмены действий
 @router.message(commands=["cancel"])
@@ -38,38 +41,30 @@ async def cancel_handler(message: types.Message, state: FSMContext) -> None:
     logging.info("Cancelling state %r", current_state)
     await state.clear()
     await message.answer(
-        "Завершено.",
+        "Завершено!\nДля запуска нажми /start",
         reply_markup=ReplyKeyboardRemove()
     )
 
-# хэндлер на "Указать город" с предложением ввести город
-@router.message(Text(text='Указать город'), content_types="text")
+# хэндлер на "Город" с предложением ввести город
+@router.message(Text(text='Город'), content_types="text", state=MenuState.start)
 async def type_forecast_menu(msg: types.Message, state: FSMContext) -> None:
-    await msg.delete()    
-    await msg.answer(text='Введи и отправь название населенного пункта.')
+    #await msg.delete()    
+    await msg.answer(text='Введи название населенного пункта.')
     await state.set_state(MenuState.waiting_city)
 
 # хэндлер на название города с предложением уточнить координаты
-@router.message(content_types='text', state=MenuState.start)
+@router.message(content_types='text', state=MenuState.waiting_city)
 async def get_geo(msg: types.Message, state: FSMContext) -> None:
-    await msg.answer(text='Пожалуйста, подожди.\nУточняю координаты...')
-    cities = external_api.owm_api_geo(msg.text)    
-    if cities:        
-        await msg.answer(text= f'Найдены следующие населенные пункты.\n'
-                               f'{msg.from_user.first_name}, <b>подтвердите</b>, пожалуйста, ваш выбор:', \
-                               reply_markup=await keyboards.add_buttons(cities))
-        await state.set_state(MenuState.waiting_geo)        
+    await msg.answer(text='Пожалуйста, немного подожди.\nОпределяю координаты...')
+    cities = external_api.direct_geocoding(msg.text)    
+    if cities:   
+        await state.set_state(MenuState.waiting_geo)     
+        await msg.answer(text= 'Нашёл следующие населенные пункты.\n'
+                               '<b>Уточни</b>, пожалуйста, свой выбор:', \
+                               reply_markup=await keyboards.add_buttons(cities))                
     else:
-        await msg.answer(text='Проверьте, что вы верно указали населённый пункт и повторите ввод.\nДля <b>отмены</b> нажмите /cancel')  
-
-
-
-# @router.callback_query(state=MenuState.waiting_period)
-# async def callback_period(callback: types.CallbackQuery, state: FSMContext) -> None:     
-#     await callback.message.answer('Введите <b><u>название</u></b> населенного пункта:')
-#     await state.update_data(period=callback.data)    
-#     await state.set_state(MenuState.waiting_city)
-#     await callback.answer()
+        await msg.answer(text='Проверь, пожалуйста, что ты верно указал населённый пункт и повтори ввод.\n'
+                              'Для <b>отмены</b> нажми /cancel')
 
 @router.callback_query(keyboards.GeoCallbackFactory.filter(), state=MenuState.waiting_geo)
 async def callback_geo(callback: types.CallbackQuery, \
@@ -78,18 +73,23 @@ async def callback_geo(callback: types.CallbackQuery, \
     
     await state.update_data(lon=callback_data.lon, lat=callback_data.lat)
     
-    await callback.message.answer(text='Выберите нужный <b><u>период</u></b> погоды:', \
+    await callback.message.answer(text='Выбери нужный <b>тип</b> погоды:', \
                               reply_markup= await keyboards.type_forecast_menu())
     await state.set_state(MenuState.waiting_period)
     await callback.answer()    
 
 # хэндлер на отправленную пользователем геолокацию (без ввода названия города и уточнений)
 @router.message(content_types="location", state=MenuState.start)
-async def geolocation(msg: types.Location, state: FSMContext) -> None:    
-    await msg.answer(text='Выберите нужный <b><u>период</u></b> погоды:', \
-                     reply_markup= await keyboards.type_forecast_menu())
-    await state.set_state(MenuState.waiting_period)
-    await state.update_data(lon=msg.location.longitude, lat=msg.location.latitude)
+async def get_geolocation(msg: types.Location, state: FSMContext) -> None:
+    cities = external_api.reverse_geocoding(lon=msg.location.longitude, lat=msg.location.latitude)
+    if cities: 
+        await state.set_state(MenuState.waiting_geo)       
+        await msg.answer(text= 'Нашёл следующие населенные пункты.\n'
+                               '<b>Уточни</b>, пожалуйста, свой выбор:', \
+                               reply_markup=await keyboards.add_buttons(cities))                
+    else:
+        await msg.answer(text='Не удалось уточнить координаты.\n'
+                              'Для <b>отмены</b> нажми /cancel')
 
 # хэндлер на выбранный тип погоды
 @router.callback_query(state=MenuState.waiting_period)
@@ -100,13 +100,13 @@ async def forecast(callback: types.CallbackQuery, state: FSMContext) -> None:
         weather = external_api.get_weather(data)
     elif type_forecast == 'forecast':
         weather = external_api.get_forecast(data)
-    await callback.message.answer(weather)
-    await state.clear()
+    await callback.message.answer(weather, reply_markup= await keyboards.start_menu())
+    await state.set_state(MenuState.start) 
     await callback.answer() 
 
 # хэндлер для прочего текста
 @router.message(content_types="text", state='*')
-async def other_cmd(msg: types.Message, state: FSMContext) -> None:  
-    await state.set_state(MenuState.start)  
-    await msg.reply(text='Привет! Отправь мне название населённого пункта или своё местоположение.',
+async def other_cmd(msg: types.Message, state: FSMContext) -> None:
+    await state.set_state(MenuState.start)   
+    await msg.reply(text='Выбери "Город" или "Отправить моё местоположение"',
                      reply_markup= await keyboards.start_menu())

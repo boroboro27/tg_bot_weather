@@ -26,7 +26,7 @@ async def main():
     # client.register_handlers_client(dp)
     
     # Запускаем бота и пропускаем все накопленные входящие
-    # Да, этот метод можно вызвать даже если у вас поллинг
+    # Да, этот метод можно вызвать даже если поллинг
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)       
 
