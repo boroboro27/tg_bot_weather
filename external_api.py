@@ -1,10 +1,10 @@
 import requests
 import pycountry # docs https://pypi.org/project/pycountry/
 from datetime import datetime, timezone, timedelta
-from  pprint import pprint
 from weather_pics import code_to_unipic
 import config
 import pymorphy2
+from controller import logging
 
 # OWM_TOKEN= os.getenv('OWM_TOKEN')
 # MTT_TOKEN= os.getenv('MTT_TOKEN')
@@ -16,7 +16,13 @@ def mtt_api(text: str) -> str:
     try:
         url = "https://microsoft-translator-text.p.rapidapi.com/translate"
 
-        querystring = {"to[0]":"ru","api-version":"3.0","from":"en","profanityAction":"NoAction","textType":"plain"}
+        querystring = {
+            "to[0]":"ru",
+            "api-version":"3.0",
+            "from":"en",
+            "profanityAction":"NoAction",
+            "textType":"plain"
+        }
 
         payload = [{"Text": text}]
         headers = {
@@ -25,56 +31,72 @@ def mtt_api(text: str) -> str:
             "X-RapidAPI-Host": "microsoft-translator-text.p.rapidapi.com"
         }
 
-        response = requests.request("POST", url, json=payload, headers=headers, params=querystring)
+        response = requests.request(
+            "POST", 
+            url, 
+            json=payload, 
+            headers=headers, 
+            params=querystring
+        )
 
         if response.status_code != 200:
-            return '<ошибка на сервере Microsoft Translator Text API>'
+            logging.error(
+                'Microsoft Translator Text API: код %r на POST-запрос: %r',
+                response.status_code, 
+                querystring
+            )            
         
         return response.json()
-    except Exception as ex:
-        print(f'error mtt_api: {ex}')
-    except requests.ConnectionError:
-        return '<сетевая ошибка Microsoft Translator Text API>'
+    except Exception as _ex:
+        logging.error('Microsoft Translator Text API: %r', _ex)
+
 
 def direct_geocoding(city: str) -> dict:
     '''OpenWeather Direct Geocoding API
     https://openweathermap.org/api/geocoding-api'''
     
     try:
-        r = requests.get(
+        response = requests.get(
             f'http://api.openweathermap.org/geo/1.0/direct?q={city}&limit={10}&appid={config.OWM_TOKEN}'
         )
-        if r.status_code != 200:
-            return '<ошибка на сервере OpenWeather Geocoding API>'
-        dict_full = parse_geocode(r.json())
+        if response.status_code != 200:
+            logging.error(
+                'OpenWeather Direct Geocoding API: ответ код %r на геокодирование города: %r',
+                response.status_code, 
+                city
+            )
+            dict_full = {}
+            return dict_full        
+        
+        dict_full = parse_geocode(response.json())
         return dict_full 
         
-    except Exception as ex:
-        print(ex)
-        return False
-        #добавить логирование
-    except requests.ConnectionError:
-        return '<сетевая ошибка>'
+    except Exception as _ex:
+        logging.error('OpenWeather Direct Geocoding API: %r', _ex)
 
 def reverse_geocoding(lon: str, lat: str) -> dict:
     '''OpenWeather Reverse Geocoding API
     https://openweathermap.org/api/geocoding-api'''
     
     try:
-        r = requests.get(
+        response = requests.get(
             f'http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=10&appid={config.OWM_TOKEN}'
         )
-        if r.status_code != 200:
-            return '<ошибка на сервере OpenWeather Geocoding API>'
-        dict_full = parse_geocode(r.json())
+        if response.status_code != 200:
+            logging.error(
+                'OpenWeather Reverse Geocoding API: ответ код %r на обратное геокодирование координат: %r, %r',
+                response.status_code, 
+                lat,
+                lon
+            )
+            dict_full = {}
+            return dict_full
+
+        dict_full = parse_geocode(response.json())
         return dict_full
         
-    except Exception as ex:
-        print(ex)
-        return False
-        #добавить логирование
-    except requests.ConnectionError:
-        return '<сетевая ошибка>'
+    except Exception as _ex:
+        logging.error('OpenWeather Reverse Geocoding API: %r', _ex)
 
 def parse_geocode(data: dict) -> dict:   
     dict_all = {} # новый словарь словарей для переведённых на русский язык результатов парсинга             
@@ -90,17 +112,20 @@ def parse_geocode(data: dict) -> dict:
         try:             
             dict_one[counter]['state'] = mtt_api(city['state'])[0]['translations'][0]['text'] # перевод региона
         except:
-            dict_one[counter]['state'] = city['state']
+            dict_one[counter]['state'] = ''
 
         #координаты для коллбэков в инлайн кнопки и отправки уточненной геопозиции       
         dict_one[counter]['geo']['lat'] = city['lat']
         dict_one[counter]['geo']['lon'] = city['lon']
 
         #получаем объект страны из api iso3166 (коды стран мира)
-        country_iso3166 = pycountry.countries.get(alpha_2=city['country']) 
-        country = mtt_api(country_iso3166.name)[0]['translations'][0]['text']  #перевод названия страны
-        if country == 'Российская Федерация': country = 'РФ'
-        dict_one[counter]['country'] = country
+        try:
+            country_iso3166 = pycountry.countries.get(alpha_2=city['country']) 
+            country = mtt_api(country_iso3166.name)[0]['translations'][0]['text']  #перевод названия страны
+            if country == 'Российская Федерация': country = 'РФ'
+            dict_one[counter]['country'] = country
+        except Exception as _ex:
+            logging.error('pycountry (iso3166): %r', _ex)
 
         dict_all.update(dict_one) # добавляем отдельный словарь в общий
         counter += 1
@@ -112,20 +137,27 @@ def get_weather(geo: dict) -> str:
     https://openweathermap.org/current'''    
 
     try:
-        r = requests.get('https://api.openweathermap.org/data/2.5/weather',
-                          params={"lat" : geo['lat'], "lon" : geo['lon'], \
-                                  "appid" : config.OWM_TOKEN, "units" : "metric", "lang" : "ru"}
-        )
+        response = requests.get('https://api.openweathermap.org/data/2.5/weather',
+                                params={"lat" : geo['lat'], 
+                                "lon" : geo['lon'],
+                                "appid" : config.OWM_TOKEN, 
+                                "units" : "metric", 
+                                "lang" : "ru"}
+                            )
         
-        if r.status_code != 200:
-            return '<ошибка на сервере погоды>'
-        text = parse_weather(r.json())
+        if response.status_code != 200:
+            logging.error(
+                'OpenWeather Current Weather API: ответ код %r на координаты: %r, %r',
+                response.status_code, 
+                geo['lat'],
+                geo['lon']
+            )
+
+        text = parse_weather(response.json())
         return text
         
-    except requests.ConnectionError:
-        return '<ошибка соединения>'
-    except Exception as ex:
-        print(ex)
+    except Exception as _ex:
+        logging.error('OpenWeather Current Weather API: %r', _ex)
 
 def parse_weather(data: dict)-> str: 
 
@@ -163,8 +195,9 @@ def parse_weather(data: dict)-> str:
         morph = pymorphy2.MorphAnalyzer()
         city = morph.parse(city)[0]
         city = city.inflect({'loct'}).word
-    except:
-        pass
+    except Exception as _ex:
+        logging.warning('pymorphy2: %r', _ex)
+        city = data["name"]
 
     text = (f"*** {datetime.now(tz=tz).strftime('%d.%m.%Y %H:%M')} ***\n"
             f"Погода сейчас в <b>{city.capitalize()}</b>\nТемпература: {cur_weather}C° {weather_description} {code_to_unipic[weather_id]}\n"
@@ -181,20 +214,27 @@ def get_forecast(geo: dict) -> str:
     https://openweathermap.org/forecast5'''
         
     try:
-        r = requests.get('https://api.openweathermap.org/data/2.5/forecast',
-            params={"lat" : geo['lat'], "lon" : geo['lon'], 'appid': config.OWM_TOKEN, \
-                    'units': 'metric', 'lang': 'ru'}
-        )
+        response = requests.get('https://api.openweathermap.org/data/2.5/forecast',
+                         params={"lat" : geo['lat'],
+                                 "lon" : geo['lon'],
+                                 'appid': config.OWM_TOKEN,
+                                 'units': 'metric',
+                                 'lang': 'ru'
+                         }
+                    )
 
-        if r.status_code != 200:
-            return '<ошибка на сервере OpenWeather 5Day/3Hour Forecast API>'
-        text = parse_forecast(r.json())
+        if response.status_code != 200:
+            logging.error(
+                'OpenWeather 5Day/3Hour Forecast API: ответ код %r на координаты: %r, %r',
+                response.status_code, 
+                geo['lat'],
+                geo['lon']
+            )
+        text = parse_forecast(response.json())
         return text        
 
-    except requests.ConnectionError:
-        return '<ошибка соединения>'
-    except Exception as ex:
-        print(ex)
+    except Exception as _ex:
+        logging.error('OpenWeather 5Day/3Hour Forecast API: %r', _ex)
 
 def parse_forecast(data: dict)-> str:
         
@@ -217,8 +257,9 @@ def parse_forecast(data: dict)-> str:
         morph = pymorphy2.MorphAnalyzer()
         city = morph.parse(city)[0]
         city = city.inflect({'loct'}).word
-    except:
-        pass
+    except Exception as _ex:
+        logging.warning('pymorphy2: %r', _ex)
+        city = data["city"]["name"]
 
     text = f"Погода в {city.capitalize()}, {day_forecast.strftime('%d-%m-%Y')}"
 

@@ -23,7 +23,7 @@ async def start_cmd(msg: types.Message, state: FSMContext) -> None:
     await state.set_state(MenuState.start) 
     text = (f'{msg.from_user.first_name}, привет! У природы нет плохой погоды!\U0001F308'
             '\nА прогноз дорог к обеду:)\n'
-            'В общем, отправь мне название нужного населённого пункта или своё местоположение.'
+            'В общем, жми "Город" или отправляй своё местоположение.'
     ) 
     await msg.answer(text=text, reply_markup= await keyboards.start_menu())    
 
@@ -55,16 +55,16 @@ async def type_forecast_menu(msg: types.Message, state: FSMContext) -> None:
 # хэндлер на название города с предложением уточнить координаты
 @router.message(content_types='text', state=MenuState.waiting_city)
 async def get_geo(msg: types.Message, state: FSMContext) -> None:
-    await msg.answer(text='Пожалуйста, немного подожди.\nОпределяю координаты...')
+    await msg.answer(text='Определяю координаты...')
     cities = external_api.direct_geocoding(msg.text)    
     if cities:   
         await state.set_state(MenuState.waiting_geo)     
-        await msg.answer(text= 'Нашёл следующие населенные пункты.\n'
-                               '<b>Уточни</b>, пожалуйста, свой выбор:', \
+        await msg.answer(text= '<b>Уточни</b>, пожалуйста, свой выбор:', \
                                reply_markup=await keyboards.add_buttons(cities))                
     else:
         await msg.answer(text='Проверь, пожалуйста, что ты верно указал населённый пункт и повтори ввод.\n'
                               'Для <b>отмены</b> нажми /cancel')
+        logging.warning('Город %r не распознан', msg.text)
 
 @router.callback_query(keyboards.GeoCallbackFactory.filter(), state=MenuState.waiting_geo)
 async def callback_geo(callback: types.CallbackQuery, \
@@ -81,15 +81,17 @@ async def callback_geo(callback: types.CallbackQuery, \
 # хэндлер на отправленную пользователем геолокацию (без ввода названия города и уточнений)
 @router.message(content_types="location", state=MenuState.start)
 async def get_geolocation(msg: types.Location, state: FSMContext) -> None:
-    cities = external_api.reverse_geocoding(lon=msg.location.longitude, lat=msg.location.latitude)
+    lon=msg.location.longitude
+    lat=msg.location.latitude
+    cities = external_api.reverse_geocoding(lon=lon, lat=lat)
     if cities: 
         await state.set_state(MenuState.waiting_geo)       
-        await msg.answer(text= 'Нашёл следующие населенные пункты.\n'
-                               '<b>Уточни</b>, пожалуйста, свой выбор:', \
+        await msg.answer(text= '<b>Уточни</b>, пожалуйста, свой выбор:', \
                                reply_markup=await keyboards.add_buttons(cities))                
     else:
         await msg.answer(text='Не удалось уточнить координаты.\n'
                               'Для <b>отмены</b> нажми /cancel')
+        logging.warning('Не удалось уточнить координаты: %r,%r', lat, lon)
 
 # хэндлер на выбранный тип погоды
 @router.callback_query(state=MenuState.waiting_period)
@@ -101,12 +103,13 @@ async def forecast(callback: types.CallbackQuery, state: FSMContext) -> None:
     elif type_forecast == 'forecast':
         weather = external_api.get_forecast(data)
     await callback.message.answer(weather, reply_markup= await keyboards.start_menu())
+    await callback.message.answer_location(latitude=data['lat'], longitude=data['lon'])
     await state.set_state(MenuState.start) 
     await callback.answer() 
 
 # хэндлер для прочего текста
-@router.message(content_types="text", state='*')
+@router.message(state='*')
 async def other_cmd(msg: types.Message, state: FSMContext) -> None:
     await state.set_state(MenuState.start)   
-    await msg.reply(text='Выбери "Город" или "Отправить моё местоположение"',
+    await msg.reply(text='Нажми "Город" или "Отправить моё местоположение"',
                      reply_markup= await keyboards.start_menu())
