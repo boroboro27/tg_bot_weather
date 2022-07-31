@@ -1,53 +1,26 @@
 import asyncio
-from logging import handlers
 from aiogram import Bot, Dispatcher
+
 import handlers
-import config
-import psycopg2
-from config import host, user, password, db_name
+from config import TELEGRAM_TOKEN
+from database import PSQLRequests as psql
 
 import logging
 import sys 
 import os      
 
-def conn_psql():
-    try:
-        #подключаемся к БД PostgreSQL
-        conn = psycopg2.connect(
-            host=host,
-            user=user,
-            password=password,
-            dbname=db_name
-        )
-        logging.info("PostgreSQL connection started.")
-
-        #создаем курсор для оперирования БД
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT version();"
-            )
-            print(f"Server version: {cur.fetchone()}")        
-
-    except Exception as _ex:
-        logging.error("Error while working with PostgreSQL %r", _ex)        
-    finally:
-        conn.close()
-        logging.info("PostgreSQL connection closed.")        
-
 
 # Запуск бота
 async def main():
     # Включаем логирование, чтобы не пропустить важные сообщения
-    logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     
-    #sqlite_db.sql_start()
-
     # TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
     #подключаем БД
-    conn_psql()           
+    db = psql()          
 
-    bot = Bot(token=config.TELEGRAM_TOKEN, parse_mode='HTML')    
+    bot = Bot(token=TELEGRAM_TOKEN, parse_mode='HTML')    
     dp = Dispatcher()
 
     dp.include_router(handlers.router) # подключаем роутер к диспетчеру    
@@ -59,10 +32,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-    
-
-
-
     
