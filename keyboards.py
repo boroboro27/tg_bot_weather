@@ -1,7 +1,7 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.dispatcher.filters.callback_data import CallbackData
+from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                           KeyboardButton, ReplyKeyboardMarkup)
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-
 
 #from typing import Optional #если нужно сделать одно из значений фабрики не обязательным
 # например,

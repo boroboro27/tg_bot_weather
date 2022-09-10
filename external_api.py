@@ -1,17 +1,22 @@
-import requests
-import pycountry # docs https://pypi.org/project/pycountry/
-from datetime import datetime, timezone, timedelta
-from weather_pics import code_to_unipic
-import config
+import logging
+from datetime import datetime, timedelta, timezone
+
+import pycountry  # docs https://pypi.org/project/pycountry/
 import pymorphy2
-from controller import logging
+import requests
+
+import config
+from weather_pics import code_to_unipic
+
+logger = logging.getLogger(__name__)
 
 # OWM_TOKEN= os.getenv('OWM_TOKEN')
 # MTT_TOKEN= os.getenv('MTT_TOKEN')
 
 def mtt_api(text: str) -> str:
     '''Microsoft Translator Text API 
-    https://rapidapi.com/ru/microsoft-azure-org-microsoft-cognitive-services/api/microsoft-translator-text/'''       
+    https://rapidapi.com/ru/microsoft-azure-org-microsoft-cognitive-services/api/microsoft-translator-text/
+    '''       
     
     try:
         url = "https://microsoft-translator-text.p.rapidapi.com/translate"
@@ -40,7 +45,7 @@ def mtt_api(text: str) -> str:
         )
 
         if response.status_code != 200:
-            logging.error(
+            logger.error(
                 'Microsoft Translator Text API: код %r на POST-запрос: %r',
                 response.status_code, 
                 querystring
@@ -48,19 +53,20 @@ def mtt_api(text: str) -> str:
         
         return response.json()
     except Exception as _ex:
-        logging.error('Microsoft Translator Text API: %r', _ex)
+        logger.error('Microsoft Translator Text API: %r', _ex)
 
 
 def direct_geocoding(city: str) -> dict:
     '''OpenWeather Direct Geocoding API
-    https://openweathermap.org/api/geocoding-api'''
+    https://openweathermap.org/api/geocoding-api
+    '''
     
     try:
         response = requests.get(
             f'http://api.openweathermap.org/geo/1.0/direct?q={city}&limit={10}&appid={config.OWM_TOKEN}'
         )
         if response.status_code != 200:
-            logging.error(
+            logger.error(
                 'OpenWeather Direct Geocoding API: ответ код %r на геокодирование города: %r',
                 response.status_code, 
                 city
@@ -72,18 +78,19 @@ def direct_geocoding(city: str) -> dict:
         return dict_full 
         
     except Exception as _ex:
-        logging.error('OpenWeather Direct Geocoding API: %r', _ex)
+        logger.error('OpenWeather Direct Geocoding API: %r', _ex)
 
 def reverse_geocoding(lon: str, lat: str) -> dict:
     '''OpenWeather Reverse Geocoding API
-    https://openweathermap.org/api/geocoding-api'''
+    https://openweathermap.org/api/geocoding-api
+    '''
     
     try:
         response = requests.get(
             f'http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=10&appid={config.OWM_TOKEN}'
         )
         if response.status_code != 200:
-            logging.error(
+            logger.error(
                 'OpenWeather Reverse Geocoding API: ответ код %r на обратное геокодирование координат: %r, %r',
                 response.status_code, 
                 lat,
@@ -96,7 +103,7 @@ def reverse_geocoding(lon: str, lat: str) -> dict:
         return dict_full
         
     except Exception as _ex:
-        logging.error('OpenWeather Reverse Geocoding API: %r', _ex)
+        logger.error('OpenWeather Reverse Geocoding API: %r', _ex)
 
 def parse_geocode(data: dict) -> dict:   
     dict_all = {} # новый словарь словарей для переведённых на русский язык результатов парсинга             
@@ -125,7 +132,7 @@ def parse_geocode(data: dict) -> dict:
             if country == 'Российская Федерация': country = 'РФ'
             dict_one[counter]['country'] = country
         except Exception as _ex:
-            logging.error('pycountry (iso3166): %r', _ex)
+            logger.error('pycountry (iso3166): %r', _ex)
 
         dict_all.update(dict_one) # добавляем отдельный словарь в общий
         counter += 1
@@ -134,7 +141,8 @@ def parse_geocode(data: dict) -> dict:
       
 def get_weather(geo: dict) -> str:
     '''OpenWeather Current Weather API
-    https://openweathermap.org/current'''    
+    https://openweathermap.org/current
+    '''    
 
     try:
         response = requests.get('https://api.openweathermap.org/data/2.5/weather',
@@ -146,7 +154,7 @@ def get_weather(geo: dict) -> str:
                             )
         
         if response.status_code != 200:
-            logging.error(
+            logger.error(
                 'OpenWeather Current Weather API: ответ код %r на координаты: %r, %r',
                 response.status_code, 
                 geo['lat'],
@@ -157,7 +165,7 @@ def get_weather(geo: dict) -> str:
         return text
         
     except Exception as _ex:
-        logging.error('OpenWeather Current Weather API: %r', _ex)
+        logger.error('OpenWeather Current Weather API: %r', _ex)
 
 def parse_weather(data: dict)-> str: 
 
@@ -196,7 +204,7 @@ def parse_weather(data: dict)-> str:
         city = morph.parse(city)[0]
         city = city.inflect({'loct'}).word
     except Exception as _ex:
-        logging.warning('pymorphy2: %r', _ex)
+        logger.warning('pymorphy2: %r', _ex)
         city = data["name"]
 
     text = (f"*** {datetime.now(tz=tz).strftime('%d.%m.%Y %H:%M')} ***\n"
@@ -211,7 +219,8 @@ def parse_weather(data: dict)-> str:
 
 def get_forecast(geo: dict) -> str:
     '''OpenWeather 5Day/3Hour Forecast API
-    https://openweathermap.org/forecast5'''
+    https://openweathermap.org/forecast5
+    '''
         
     try:
         response = requests.get('https://api.openweathermap.org/data/2.5/forecast',
@@ -224,7 +233,7 @@ def get_forecast(geo: dict) -> str:
                     )
 
         if response.status_code != 200:
-            logging.error(
+            logger.error(
                 'OpenWeather 5Day/3Hour Forecast API: ответ код %r на координаты: %r, %r',
                 response.status_code, 
                 geo['lat'],
@@ -234,7 +243,7 @@ def get_forecast(geo: dict) -> str:
         return text        
 
     except Exception as _ex:
-        logging.error('OpenWeather 5Day/3Hour Forecast API: %r', _ex)
+        logger.error('OpenWeather 5Day/3Hour Forecast API: %r', _ex)
 
 def parse_forecast(data: dict)-> str:
         
@@ -258,7 +267,7 @@ def parse_forecast(data: dict)-> str:
         city = morph.parse(city)[0]
         city = city.inflect({'loct'}).word
     except Exception as _ex:
-        logging.warning('pymorphy2: %r', _ex)
+        logger.warning('pymorphy2: %r', _ex)
         city = data["city"]["name"]
 
     text = f"Погода в {city.capitalize()}, {day_forecast.strftime('%d-%m-%Y')}"

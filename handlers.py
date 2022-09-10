@@ -1,14 +1,19 @@
-from aiogram.dispatcher.filters import Text
-from aiogram import types, Router, F
-from aiogram.types import ReplyKeyboardRemove
-from aiogram.dispatcher.fsm.context import FSMContext 
-from aiogram.dispatcher.fsm.state import State, StatesGroup
+import logging.config
 
+from aiogram import F, Router, types
+from aiogram.dispatcher.filters import Text
+from aiogram.dispatcher.fsm.context import FSMContext
+from aiogram.dispatcher.fsm.state import State, StatesGroup
+from aiogram.types import ReplyKeyboardRemove
+from logconf import LOGGING_CONFIG
 import external_api
 import keyboards
-from controller import logging
+from database import Database
 
+logging.config.dictConfig(LOGGING_CONFIG)
+logger = logging.getLogger("__name__")
 router = Router()  # [1]
+db = Database()
 
 class MenuState(StatesGroup):
     start = State()  
@@ -20,11 +25,14 @@ class MenuState(StatesGroup):
 # то хэндлер сообщения сработает даже на картинку с подписью /start
 @router.message(content_types="text", commands='start')
 async def start_cmd(msg: types.Message, state: FSMContext) -> None:  
-    await state.set_state(MenuState.start) 
-    text = (f'{msg.from_user.first_name}, привет! У природы нет плохой погоды!\U0001F308'
-            '\nА прогноз дорог к обеду:)\n'
-            'В общем, жми "Город" или отправляй своё местоположение.'
-    ) 
+    await state.set_state(MenuState.start)
+    if (not db.user_exists(user_id=msg.from_user.id)):
+        db.add_user(user_id=msg.from_user.id, full_name=msg.from_user.full_name)
+        logger.info("Пользователь уже внесен в БД ранее")
+    text = (f'{msg.from_user.first_name}, привет! \U0001F308'
+            '\nЕсть поговорка -  прогноз дорог к обеду:)\n'
+            'В общем, жмите "Город" или отправляйте своё местоположение.'
+        ) 
     await msg.answer(text=text, reply_markup= await keyboards.start_menu())    
 
 # даём возможность отмены действий
@@ -38,7 +46,7 @@ async def cancel_handler(message: types.Message, state: FSMContext) -> None:
     if current_state is None:
         return
 
-    logging.info("Cancelling state %r", current_state)
+    logger.info("Cancelling state %r", current_state)
     await state.clear()
     await message.answer(
         "Завершено!\nДля запуска нажми /start",
@@ -48,9 +56,10 @@ async def cancel_handler(message: types.Message, state: FSMContext) -> None:
 # хэндлер на "Город" с предложением ввести город
 @router.message(Text(text='Город'), content_types="text", state=MenuState.start)
 async def type_forecast_menu(msg: types.Message, state: FSMContext) -> None:
-    #await msg.delete()    
-    await msg.answer(text='Введи название населенного пункта.')
-    await state.set_state(MenuState.waiting_city)
+    await msg.delete()  
+    await state.set_state(MenuState.waiting_city)  
+    await msg.answer(text='Введите название населенного пункта.')
+    
 
 # хэндлер на название города с предложением уточнить координаты
 @router.message(content_types='text', state=MenuState.waiting_city)
@@ -59,12 +68,12 @@ async def get_geo(msg: types.Message, state: FSMContext) -> None:
     cities = external_api.direct_geocoding(msg.text)    
     if cities:   
         await state.set_state(MenuState.waiting_geo)     
-        await msg.answer(text= '<b>Уточни</b>, пожалуйста, свой выбор:', \
+        await msg.answer(text= '<b>Уточните</b>, пожалуйста, ваш выбор:', \
                                reply_markup=await keyboards.add_buttons(cities))                
     else:
-        await msg.answer(text='Проверь, пожалуйста, что ты верно указал населённый пункт и повтори ввод.\n'
-                              'Для <b>отмены</b> нажми /cancel')
-        logging.warning('Город %r не распознан', msg.text)
+        await msg.answer(text='Проверьте, пожалуйста, что вы верно указали населённый пункт и повторите ввод.\n'
+                              'Для <b>отмены</b> нажмите /cancel')
+        logger.warning('Город %r не распознан', msg.text)
 
 @router.callback_query(keyboards.GeoCallbackFactory.filter(), state=MenuState.waiting_geo)
 async def callback_geo(callback: types.CallbackQuery, \
@@ -91,7 +100,7 @@ async def get_geolocation(msg: types.Location, state: FSMContext) -> None:
     else:
         await msg.answer(text='Не удалось уточнить координаты.\n'
                               'Для <b>отмены</b> нажми /cancel')
-        logging.warning('Не удалось уточнить координаты: %r,%r', lat, lon)
+        logger.warning('Не удалось уточнить координаты: %r,%r', lat, lon)
 
 # хэндлер на выбранный тип погоды
 @router.callback_query(state=MenuState.waiting_period)

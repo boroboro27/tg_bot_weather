@@ -3,3 +3,5 @@ __pycache__
 config.py
 .vscode/launch.json
 Логика приложения.dia.autosave
+.env
+bot.log
